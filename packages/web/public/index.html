@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mix — Agent Session Gateway</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <header>
+      <h1>Mix</h1>
+      <button id="refresh" title="重新扫描">⟳</button>
+      <button id="new-mock" title="新建 Mock 会话">+ Mock</button>
+    </header>
+    <ul id="session-list"></ul>
+  </aside>
+  <main id="chat">
+    <div id="transcript"><p class="placeholder">← 选择一个会话</p></div>
+    <div id="approvals"></div>
+    <form id="composer">
+      <input id="prompt" type="text" placeholder="输入提示…(Enter 发送)" autocomplete="off" />
+      <button id="send" type="submit">发送</button>
+      <button id="interrupt" type="button">中断</button>
+    </form>
+  </main>
+</div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>
