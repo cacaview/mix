@@ -23,7 +23,10 @@ export class CodexDriver implements AgentDriver {
   private nextId = 1;
   private pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
 
-  constructor(private opts: CodexDriverOptions) {
+  private opts: CodexDriverOptions;
+
+  constructor(opts: CodexDriverOptions) {
+    this.opts = opts;
     this.nativeId = opts.threadId;
   }
 

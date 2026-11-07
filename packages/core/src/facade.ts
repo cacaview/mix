@@ -15,6 +15,8 @@
 //    the codex client's turn simply stays in progress until resolved.
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { createServer } from 'node:http';
+import { tokenOk } from './auth.ts';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { Gateway } from './gateway.ts';
 import type { SessionEvent, SessionRef } from './types.ts';
@@ -22,6 +24,8 @@ import type { SessionEvent, SessionRef } from './types.ts';
 export interface FacadeOptions {
   port: number;
   host?: string;
+  /** Bearer token required on WS upgrades (Authorization header or ?token=). */
+  token?: string;
   codexPath?: string;
   /** When false, no upstream codex app-server is spawned (claude-only list). */
   upstream?: boolean;
@@ -67,7 +71,16 @@ function threadListItemFromRef(ref: SessionRef): Record<string, unknown> {
 }
 
 export function serveFacade(gateway: Gateway, opts: FacadeOptions): { close(): Promise<void>; port: number } {
-  const wss = new WebSocketServer({ port: opts.port, host: opts.host ?? '127.0.0.1' });
+  const httpServer = createServer((_req, res) => { res.writeHead(404); res.end(); });
+  const wss = new WebSocketServer({ noServer: true });
+  httpServer.on('upgrade', (req, socket, head) => {
+    if (!tokenOk(req, opts.token)) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+  });
   const clients = new Set<WebSocket>();
 
   const broadcast = (msg: unknown) => {
@@ -217,6 +230,13 @@ export function serveFacade(gateway: Gateway, opts: FacadeOptions): { close(): P
         const seen = new Set(claude.map((t) => t.id));
         return { data: [...claude, ...upstreamData.filter((t) => !seen.has(t.id))] };
       }
+      case 'thread/start': {
+        // "New chat" from a native codex client creates a Claude session on
+        // this host (the mix default; runtime selection lands later).
+        const cwd = typeof params?.cwd === 'string' && params.cwd ? params.cwd : process.cwd();
+        const ref = await gateway.createClaudeSession(cwd, params?.title ?? 'New chat (via facade)');
+        return { thread: threadListItemFromRef({ ...ref, active: true }) };
+      }
       case 'thread/resume': {
         const threadId = String(params?.threadId ?? '');
         if (!threadId.startsWith('claude:')) return upCall(method, params);
@@ -258,11 +278,14 @@ export function serveFacade(gateway: Gateway, opts: FacadeOptions): { close(): P
 
   startUpstream();
 
+  httpServer.listen(opts.port, opts.host ?? '127.0.0.1');
+
   return {
     port: opts.port,
     close: () => new Promise<void>((done) => {
       try { upstream?.kill(); } catch { /* ignore */ }
-      wss.close(() => done());
+      wss.close();
+      httpServer.close(() => done());
     }),
   };
 }
