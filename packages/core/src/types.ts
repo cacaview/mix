@@ -2,7 +2,7 @@
 // Normalized event/session model — every agent driver maps its native
 // protocol into these shapes (see docs/04-protocol-matrix.md).
 
-export type AgentId = 'claude' | 'codex' | 'opencode' | 'mock';
+export type AgentId = 'claude' | 'codex' | 'opencode' | 'mock' | 'acp';
 
 /** A session known to the gateway (loaded or persisted on disk). */
 export interface SessionRef {
@@ -18,6 +18,8 @@ export interface SessionRef {
   active: boolean;
   /** True when another process may own the writer role (best-effort signal). */
   externallyOwned?: boolean;
+  /** Agent-specific metadata (e.g. { profile } for ACP sessions). */
+  extra?: Record<string, unknown>;
 }
 
 export type SessionEvent =

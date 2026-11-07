@@ -25,6 +25,10 @@ program
   .option('--host <host>', 'bind address (default 127.0.0.1; 0.0.0.0 for LAN/public)', '127.0.0.1')
   .option('--token <token>', 'bearer token required by remote clients')
   .option('--token-env <var>', 'read the bearer token from this environment variable')
+  .option('--approval-policy <policy>', 'resolve approvals without a human: interactive | allow | deny', 'interactive')
+  .option('--approval-timeout-ms <ms>', 'auto-deny interactive approvals after this long (0 = wait)', '0')
+  .option('--acp-env <var>', 'JSON array of ACP agent profiles from this env var (name/command/args)')
+  .option('--no-watch', 'disable live session discovery watching')
   .option('--open', 'open the web UI in the default browser')
   .action(async (opts) => {
     const { isLoopbackHost } = await import('@mix/core');
@@ -33,7 +37,25 @@ program
       console.error('refusing to bind a non-loopback address without --token/--token-env');
       process.exit(1);
     }
-    const gateway = new Gateway();
+    let acpAgents: { name: string; command: string; args?: string[] }[] = [];
+    if (opts.acpEnv) {
+      try {
+        acpAgents = JSON.parse(process.env[opts.acpEnv] ?? '[]');
+        console.log(`  ${acpAgents.length} ACP profiles: ${acpAgents.map((a) => a.name).join(', ') || '(none)'}`);
+      } catch {
+        console.error(`invalid JSON in env ${opts.acpEnv}; ignoring ACP profiles`);
+      }
+    }
+    const policy = ['interactive', 'allow', 'deny'].includes(opts.approvalPolicy) ? opts.approvalPolicy as 'interactive' | 'allow' | 'deny' : 'interactive';
+    const gateway = new Gateway({
+      approvalPolicy: policy,
+      approvalTimeoutMs: Number(opts.approvalTimeoutMs) || 0,
+      acpAgents,
+    });
+    if (opts.watch !== false) {
+      gateway.startWatching();
+      console.log('discovery watching: on (claude/codex stores)');
+    }
     console.log('discovering sessions…');
     const sessions = await gateway.refreshSessions();
     console.log(`  ${sessions.length} sessions indexed`);

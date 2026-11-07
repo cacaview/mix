@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mix — 访问令牌</title>
+<style>
+  body { background:#101418; color:#dbe4ee; font-family:"Segoe UI",system-ui,sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; }
+  .card { background:#171d24; border:1px solid #2a3340; border-radius:12px; padding:32px 40px; width:min(420px, 90vw); }
+  h1 { font-size:18px; margin:0 0 6px; }
+  p { color:#7d8b9c; font-size:13px; margin:0 0 18px; }
+  input { width:100%; box-sizing:border-box; background:#101418; color:#dbe4ee; border:1px solid #2a3340; border-radius:8px; padding:10px 12px; font-size:14px; }
+  button { margin-top:12px; width:100%; padding:10px; border-radius:8px; border:1px solid #4da3ff; background:#24406b; color:#dbe4ee; font-size:14px; cursor:pointer; }
+  .err { color:#f2555a; font-size:12px; margin-top:10px; min-height:14px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Mix</h1>
+  <p>此网关已启用访问令牌保护,请输入 `mix serve --token` 设置的令牌。</p>
+  <input id="token" type="password" placeholder="访问令牌" autocomplete="off" autofocus />
+  <button id="enter">进入</button>
+  <div class="err" id="err"></div>
+</div>
+<script>
+  const params = new URLSearchParams(location.search);
+  const preset = params.get('token');
+  const enter = (t) => {
+    localStorage.setItem('mix-token', t);
+    document.cookie = `mix_token=${encodeURIComponent(t)}; Path=/; SameSite=Strict`;
+    location.replace('/' + (location.search ? '?' + location.search : ''));
+  };
+  document.getElementById('enter').onclick = () => {
+    const t = document.getElementById('token').value.trim();
+    if (!t) { document.getElementById('err').textContent = '请输入令牌'; return; }
+    enter(t);
+  };
+  document.getElementById('token').addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('enter').click(); });
+  if (preset) enter(preset);
+</script>
+</body>
+</html>

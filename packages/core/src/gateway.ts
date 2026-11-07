@@ -14,6 +14,7 @@ import { CodexDriver } from './agents/codex.ts';
 import { MockDriver } from './agents/mock.ts';
 import { discoverClaudeSessions, discoverCodexSessions } from './discovery.ts';
 import { discoverOpenCodeSessions, OpenCodeDriver } from './agents/opencode.ts';
+import { AcpAgentProfile, AcpDriver } from './agents/acp.ts';
 import type { AgentDriver, ApprovalDecision, ApprovalRequest, SessionEvent, SessionRef } from './types.ts';
 
 export interface GatewayEvents {
@@ -34,6 +35,8 @@ export interface GatewayOptions {
   approvalPolicy?: ApprovalPolicy;
   /** Auto-deny interactive approvals after this long (ms). 0 = wait forever. */
   approvalTimeoutMs?: number;
+  /** ACP agent profiles available on this host (name -> spawn spec). */
+  acpAgents?: AcpAgentProfile[];
 }
 
 export class Gateway {
@@ -45,6 +48,7 @@ export class Gateway {
   private opencodeUrl: string;
   private approvalPolicy: ApprovalPolicy;
   private approvalTimeoutMs: number;
+  private acpAgents: AcpAgentProfile[];
   private opening = new Map<string, Promise<SessionRef>>();
 
   constructor(opts: GatewayOptions = {}) {
@@ -52,6 +56,7 @@ export class Gateway {
     this.opencodeUrl = opts.opencodeUrl ?? 'http://127.0.0.1:4096';
     this.approvalPolicy = opts.approvalPolicy ?? 'interactive';
     this.approvalTimeoutMs = opts.approvalTimeoutMs ?? 0;
+    this.acpAgents = opts.acpAgents ?? [];
   }
 
   on<K extends keyof GatewayEvents>(ev: K, cb: GatewayEvents[K]): void {
@@ -150,7 +155,7 @@ export class Gateway {
     return this.sessionIndex.get(gatewayId)!;
   }
 
-  #wireDriver(gatewayId: string, agent: 'claude' | 'codex' | 'mock' | 'opencode', driver: AgentDriver): void {
+  #wireDriver(gatewayId: string, agent: 'claude' | 'codex' | 'mock' | 'opencode' | 'acp', driver: AgentDriver): void {
     driver.events.on('data', (event: SessionEvent) => {
       this.bus.emit('event', gatewayId, event);
     });
@@ -202,6 +207,27 @@ export class Gateway {
       this.approvals.set(raw.requestId, entry);
       this.bus.emit('approval', request);
     });
+  }
+
+  /** Create a new ACP session for the named profile and open its driver. */
+  async createAcpSession(profileName: string, cwd: string, title?: string): Promise<SessionRef> {
+    const profile = this.acpAgents.find((p) => p.name === profileName);
+    if (!profile) throw new Error(`unknown ACP profile: ${profileName}`);
+    const gatewayId = `acp:${profileName}-${randomUUID()}`;
+    this.upsertSession({
+      gatewayId, agent: 'acp', nativeId: gatewayId.slice(4),
+      title: title ?? profileName, cwd,
+      updatedAtMs: Date.now(), active: false,
+      extra: { profile: profileName },
+    });
+    const ref = this.sessionIndex.get(gatewayId)!;
+    const driver = new AcpDriver({ profile, cwd, env: this.claudeEnv });
+    this.#wireDriver(gatewayId, 'acp', driver);
+    await driver.start();
+    await driver.newSession();
+    this.drivers.set(gatewayId, driver);
+    this.upsertSession({ ...ref, active: true, nativeId: driver.nativeId });
+    return this.sessionIndex.get(gatewayId)!;
   }
 
   /**
@@ -256,16 +282,16 @@ export class Gateway {
     if (ref) this.upsertSession({ ...ref, active: false });
   }
 
-  #parseId(gatewayId: string): [ 'claude' | 'codex' | 'mock' | 'opencode', string ] {
+  #parseId(gatewayId: string): [ 'claude' | 'codex' | 'mock' | 'opencode' | 'acp', string ] {
     const idx = gatewayId.indexOf(':');
     if (idx < 0) throw new Error(`invalid gatewayId: ${gatewayId}`);
     const agent = gatewayId.slice(0, idx);
     const nativeId = gatewayId.slice(idx + 1);
-    if (agent !== 'claude' && agent !== 'codex' && agent !== 'mock' && agent !== 'opencode') throw new Error(`unknown agent: ${agent}`);
+    if (agent !== 'claude' && agent !== 'codex' && agent !== 'mock' && agent !== 'opencode' && agent !== 'acp') throw new Error(`unknown agent: ${agent}`);
     return [agent, nativeId];
   }
 
-  #createDriver(agent: 'claude' | 'codex' | 'mock' | 'opencode', nativeId: string, ref: SessionRef): AgentDriver {
+  #createDriver(agent: 'claude' | 'codex' | 'mock' | 'opencode' | 'acp', nativeId: string, ref: SessionRef): AgentDriver {
     switch (agent) {
       case 'claude':
         return new ClaudeDriver({ sessionId: nativeId, cwd: ref.cwd || process.cwd(), resume: true, env: this.claudeEnv });
@@ -275,6 +301,15 @@ export class Gateway {
         return new MockDriver(nativeId);
       case 'opencode':
         return new OpenCodeDriver({ sessionId: nativeId, baseUrl: this.opencodeUrl });
+      case 'acp': {
+        // nativeId for acp sessions is the ACP session id after newSession();
+        // before that, the profile name marks the profile to spawn.
+        const profile = this.acpAgents.find((p) => p.name === ref.extra?.profile)
+          ?? this.acpAgents.find((p) => p.name === nativeId)
+          ?? this.acpAgents[0];
+        if (!profile) throw new Error(`no ACP profile configured (got none; use ASG_ACP_AGENTS)`);
+        return new AcpDriver({ profile, cwd: ref.cwd || process.cwd(), env: this.claudeEnv });
+      }
     }
   }
 }

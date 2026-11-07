@@ -21,7 +21,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { randomUUID } from 'node:crypto';
-import { tokenOk } from './auth.ts';
+import { requestToken, tokenOk } from './auth.ts';
 import type { Gateway } from './gateway.ts';
 import type { SessionRef } from './types.ts';
 
@@ -41,8 +41,25 @@ const MIME: Record<string, string> = {
   '.ico': 'image/x-icon',
 };
 
-function serveStatic(webRoot: string, req: IncomingMessage, res: ServerResponse): void {
-  const urlPath = (req.url ?? '/').split('?')[0];
+function serveStatic(webRoot: string, req: IncomingMessage, res: ServerResponse, token: string | undefined): void {
+  const url = new URL(req.url ?? '/', 'http://localhost');
+  const urlPath = url.pathname;
+  // Static layer auth: with a token configured, browser requests must present
+  // it (?token= on first load sets a cookie; the cookie carries later loads).
+  if (token) {
+    if (urlPath === '/gate.html') {
+      const abs = path.join(webRoot, 'gate.html');
+      res.writeHead(200, { 'content-type': MIME['.html'] });
+      createReadStream(abs).pipe(res);
+      return;
+    }
+    const presented = requestToken(req) ?? readCookie(req.headers.cookie ?? '', 'mix_token');
+    if (presented !== token) {
+      res.writeHead(302, { location: '/gate.html' });
+      res.end();
+      return;
+    }
+  }
   let rel = urlPath === '/' ? '/index.html' : urlPath;
   const abs = path.join(webRoot, rel);
   const target = existsSync(abs) && statSync(abs).isFile() ? abs : path.join(webRoot, 'index.html');
@@ -51,9 +68,17 @@ function serveStatic(webRoot: string, req: IncomingMessage, res: ServerResponse)
   createReadStream(target).pipe(res);
 }
 
+function readCookie(cookieHeader: string, name: string): string | null {
+  for (const part of cookieHeader.split(';')) {
+    const [k, ...rest] = part.trim().split('=');
+    if (k === name) return decodeURIComponent(rest.join('='));
+  }
+  return null;
+}
+
 export function serveGateway(gateway: Gateway, opts: WsGatewayOptions): { close(): Promise<void>; port: number } {
   const webRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'public');
-  const httpServer = createServer((req, res) => serveStatic(webRoot, req, res));
+  const httpServer = createServer((req, res) => serveStatic(webRoot, req, res, opts.token));
   const wss = new WebSocketServer({ noServer: true });
   // Auth gate on every WS upgrade (see packages/core/src/auth.ts).
   httpServer.on('upgrade', (req, socket, head) => {
