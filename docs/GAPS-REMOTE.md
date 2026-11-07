@@ -49,5 +49,5 @@
 - ✅ **web 静态层鉴权**:配置 token 后 HTTP 层同样受保护(gate.html + cookie;curl 实测 302→gate→进入)
 - ✅ **通用 ACP 驱动**(packages/core/src/agents/acp.ts):任意 ACP v1 stdio Agent 一键接入 —— Gemini CLI(--experimental-acp)、Qwen Code、Pi/OMP、Claude(官方 claude-agent-acp 适配器实测);**ACP Agent 审批转发**(session/request_permission → broker)实机 PASS(deny 阻断写入)
 - ✅ GUI 三形态:dev 自拉起 / 远程客户端(ASG_URL 或保存配置)/ 首次连接页;electron-builder 配置就绪
-- ⏳ GUI 安装包产出(nsis)进行中
+- ✅ **GUI 安装包已产出**:　packages/gui/release/Mix Setup 0.1.0.exe(116 MB,nsis,未签名);远程客户端模式冒烟通过
 - ⏳ 其余 Agent 驱动按 docs/03 清单扩展(ACP 驱动已覆盖其中 ACP 生态成员)
