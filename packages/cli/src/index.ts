@@ -10,25 +10,41 @@ import { Gateway, serveGateway } from '@mix/core';
 import open from 'node:child_process';
 
 const program = new Command();
+
+function gatewayUrl(opts: { url?: string; token?: string }): string {
+  const base = opts.url ?? 'ws://127.0.0.1:7688';
+  return opts.token ? `${base}?token=${encodeURIComponent(opts.token)}` : base;
+}
+
 program.name('mix').description('Mix — one control plane for coding agent sessions').version('0.1.0');
 
 program
   .command('serve')
   .description('Start the gateway server (WebSocket + built-in web UI)')
   .option('-p, --port <port>', 'port to listen on', '7688')
+  .option('--host <host>', 'bind address (default 127.0.0.1; 0.0.0.0 for LAN/public)', '127.0.0.1')
+  .option('--token <token>', 'bearer token required by remote clients')
+  .option('--token-env <var>', 'read the bearer token from this environment variable')
   .option('--open', 'open the web UI in the default browser')
   .action(async (opts) => {
+    const { isLoopbackHost } = await import('@mix/core');
+    const token = opts.tokenEnv ? process.env[opts.tokenEnv] : opts.token;
+    if (!isLoopbackHost(opts.host) && !token) {
+      console.error('refusing to bind a non-loopback address without --token/--token-env');
+      process.exit(1);
+    }
     const gateway = new Gateway();
     console.log('discovering sessions…');
     const sessions = await gateway.refreshSessions();
     console.log(`  ${sessions.length} sessions indexed`);
     const { serveGateway, serveFacade } = await import('@mix/core');
-    const server = serveGateway(gateway, { port: Number(opts.port) });
+    const server = serveGateway(gateway, { port: Number(opts.port), host: opts.host, token });
     const facadePort = Number(opts.port) + 1;
-    const facade = serveFacade(gateway, { port: facadePort });
-    console.log(`gateway listening on ws://127.0.0.1:${server.port}`);
-    console.log(`web UI:          http://127.0.0.1:${server.port}/`);
-    console.log(`codex facade:    ws://127.0.0.1:${facade.port}  (codex --remote target)`);
+    const facade = serveFacade(gateway, { port: facadePort, host: opts.host, token });
+    const displayHost = isLoopbackHost(opts.host) ? '127.0.0.1' : opts.host;
+    console.log(`gateway listening on ws://${displayHost}:${server.port}${token ? ' (token required)' : ''}`);
+    console.log(`web UI:          http://${displayHost}:${server.port}/`);
+    console.log(`codex facade:    ws://${displayHost}:${facade.port}  (codex --remote target)`);
     if (opts.open) {
       const url = `http://127.0.0.1:${server.port}/`;
       if (process.platform === 'win32') open.exec(`start ${url}`);
@@ -61,10 +77,12 @@ program
   .description('Resolve pending approvals')
   .argument('[requestId]', 'approval request id')
   .argument('[decision]', 'allow | deny')
-  .action(async (requestId, decision) => {
+  .option('-u, --url <url>', 'gateway URL', 'ws://127.0.0.1:7688')
+  .option('-t, --token <token>', 'bearer token')
+  .action(async (requestId, decision, opts) => {
     // CLI approval resolution goes through the same broker via a temporary connection.
     const { WebSocket } = await import('ws');
-    const ws = new WebSocket('ws://127.0.0.1:7688');
+    const ws = new WebSocket(gatewayUrl(opts));
     ws.on('open', () => {
       if (requestId && decision) {
         const optionId = decision === 'allow' ? 'allow_once' : 'deny_once';
@@ -91,9 +109,11 @@ program
   .command('attach')
   .description('Attach to a session (live events + prompt from stdin)')
   .argument('<gatewayId>')
-  .action(async (gatewayId) => {
+  .option('-u, --url <url>', 'gateway URL', 'ws://127.0.0.1:7688')
+  .option('-t, --token <token>', 'bearer token')
+  .action(async (gatewayId, opts) => {
     const { WebSocket } = await import('ws');
-    const ws = new WebSocket('ws://127.0.0.1:7688');
+    const ws = new WebSocket(gatewayUrl(opts));
     const readline = await import('node:readline');
     const rl = readline.createInterface({ input: process.stdin, terminal: false });
     ws.on('open', () => {
