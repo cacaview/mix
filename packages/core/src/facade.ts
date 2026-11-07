@@ -117,6 +117,12 @@ export function serveFacade(gateway: Gateway, opts: FacadeOptions): { close(): P
       upstream = null;
       return;
     }
+    // Missing codex binary must not take the facade down — degrade to
+    // claude-only service (spawn failures surface asynchronously as 'error').
+    upstream.on('error', () => {
+      console.error('[facade] upstream codex unavailable; serving gateway-hosted threads only');
+      upstream = null;
+    });
     upstream.stdout.setEncoding('utf8');
     upstream.stdout.on('data', (chunk: string) => {
       upBuf += chunk;

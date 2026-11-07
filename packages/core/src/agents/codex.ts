@@ -37,6 +37,11 @@ export class CodexDriver implements AgentDriver {
       shell: process.platform === 'win32',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    // Surface spawn failures (missing binary) as a rejected start() instead of
+    // an unhandled 'error' event that would kill the gateway process.
+    const spawnFailure = new Promise<never>((_, reject) => {
+      this.child!.on('error', (err) => reject(new Error(`codex spawn failed: ${err.message}`)));
+    });
     this.child.stdout.setEncoding('utf8');
     let buf = '';
     this.child.stdout.on('data', (chunk: string) => {
@@ -53,9 +58,10 @@ export class CodexDriver implements AgentDriver {
         }
       }
     });
-    await this.#call('initialize', {
+    const init = this.#call('initialize', {
       clientInfo: { name: 'mix', title: 'Agent Session Gateway', version: '0.1.0' },
     });
+    await Promise.race([init, spawnFailure]);
     // Attach to the thread: memory-first, rollout fallback (verified exp03b).
     await this.#call('thread/resume', { threadId: this.opts.threadId });
   }
