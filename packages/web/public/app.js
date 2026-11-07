@@ -1,6 +1,14 @@
 // Mix web client — vanilla JS over the gateway WS protocol (no build step).
 
-const ws = new WebSocket(`ws://${location.host}`);
+let token = localStorage.getItem('mix-token') ?? '';
+const wsUrl = `ws://${location.host}${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+const ws = new WebSocket(wsUrl);
+ws.addEventListener('close', (ev) => {
+  if (ev.code !== 1000) {
+    const t = prompt('需要访问令牌 (mix serve --token):');
+    if (t) { localStorage.setItem('mix-token', t); location.reload(); }
+  }
+});
 let sessions = [];
 let currentId = null;
 let pendingApprovals = new Map();
