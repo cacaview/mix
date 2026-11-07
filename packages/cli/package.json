@@ -1,0 +1,11 @@
+{
+  "name": "@mix/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": { "mix": "./src/index.ts" },
+  "dependencies": {
+    "@mix/core": "0.1.0",
+    "commander": "^12.1.0",
+    "ws": "^8.18.0"
+  }
+}
