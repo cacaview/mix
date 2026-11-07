@@ -1,0 +1,24 @@
+# Mix gateway systemd unit (Linux hosts).
+# Install:
+#   scp deploy/mix.service /etc/systemd/system/mix.service
+#   # token in /opt/mix.env (chmod 600):  ASG_TOKEN=<hex>
+#   systemctl daemon-reload && systemctl enable --now mix
+[Unit]
+Description=Mix — agent session gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/mix
+EnvironmentFile=/opt/mix.env
+# Gateway + facade on loopback; reach them via SSH tunnel or a TLS reverse proxy.
+ExecStart=/usr/local/bin/npx tsx packages/cli/src/index.ts serve --port 7688 --host 127.0.0.1 --token-env ASG_TOKEN
+Restart=always
+RestartSec=3
+User=root
+# Claude/codex CLIs live in /usr/local/bin
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=multi-user.target
