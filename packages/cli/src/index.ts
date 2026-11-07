@@ -52,6 +52,7 @@ program
     }
     const shutdown = async () => {
       console.log('\nshutting down…');
+      gateway.stopWatching();
       await server.close();
       await facade.close();
       process.exit(0);
