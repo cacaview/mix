@@ -1,0 +1,30 @@
+{
+  "name": "mix",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Mix — one control plane for coding agent sessions (Claude Code / Codex / OpenCode), usable from gui/web/tui/cli and native Codex clients",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p packages/core --noEmit && tsc -p packages/cli --noEmit && tsc -p packages/tui --noEmit",
+    "dev": "tsx packages/cli/src/index.ts serve",
+    "test:e2e": "node scripts/test-e2e.mjs",
+    "test:facade": "node scripts/test-facade.mjs",
+    "test:opencode": "node scripts/test-opencode.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.0",
+    "@types/ws": "^8.5.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "ink": "^5.1.0",
+    "react": "^18.3.0",
+    "ws": "^8.18.0"
+  }
+}
