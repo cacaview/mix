@@ -31,14 +31,20 @@
 2. ~~无鉴权~~ → auth.ts 门(网关+门面),web 端 401 后弹 token 输入重连
 3. ~~thread/start 未映射~~ → 新建聊天=新建 Claude 会话
 
+## 二轮推进(2026-11-07 晚,已完成)
+
+- ✅ **审批策略配置化**:`serve --approval-policy interactive|allow|deny --approval-timeout-ms N`(scripts/test-approval-policy.mjs PASS)
+- ✅ **发现层自动刷新**:serve 监听 claude/codex 会话存储(800ms 去抖),--no-watch 关闭
+- ✅ **openSession 并发锁**:同会话首次 open 合并为单飞
+- ✅ **systemd 常驻**:deploy/mix.service + /opt/mix.env(token 600);服务器 systemctl enable --now,跨机回归 PASS
+
 ## 剩余缺口(更新)
 
 ### P1 — 公网直连
-1. **TLS**:当前依赖 SSH 隧道;公网裸端口方案需 TLS 反代(Caddy/Nginx → wss)后端仍 loopback+token。
+1. **TLS**:当前依赖 SSH 隧道;裸 IP 无 LE 证书,需域名 + TLS 反代(Caddy → wss),后端保持 loopback+token。
 2. **服务器 codex 上游**:未装(降级模式正常);如需服务器上原生 codex 会话,`npm i -g @openai/codex` + 登录即可。
-3. **进程常驻**:服务器用 setsid+nohup;建议 systemd unit(自动重启/开机自启)。
 
 ### P2 — 产品化
-4. 审批策略配置化(interactive/allow/deny + 超时)。
-5. 发现层文件监听自动刷新;openSession 并发锁;GUI 打包(electron-builder)。
-6. 远程客户端跨平台分发(codex 之外,web UI 已可远程打开 `http://B:7688?token=…` 但 HTTP 静态层未鉴权,仅 WS 层鉴权 —— 公网部署时须反代整站加防护)。
+3. web UI 静态层未鉴权(仅 WS 层),公网部署须反代整站防护或静态层加 token 页。
+4. GUI 打包(electron-builder)与分发。
+5. 更多 Agent 驱动(见 docs/03 清单)。
