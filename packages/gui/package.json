@@ -10,13 +10,24 @@
   "build": {
     "appId": "dev.mix.gateway",
     "productName": "Mix",
-    "files": ["src/**"],
-    "directories": { "output": "release" },
-    "win": { "target": ["nsis"] },
-    "nsis": { "oneClick": true, "perMachine": false }
+    "files": [
+      "src/**"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    }
   },
   "devDependencies": {
-    "electron": "^45.2.3",
+    "electron": "45.2.3",
     "electron-builder": "^26.0.0"
   }
 }
