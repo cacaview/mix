@@ -44,7 +44,10 @@
 1. **TLS**:当前依赖 SSH 隧道;裸 IP 无 LE 证书,需域名 + TLS 反代(Caddy → wss),后端保持 loopback+token。
 2. **服务器 codex 上游**:未装(降级模式正常);如需服务器上原生 codex 会话,`npm i -g @openai/codex` + 登录即可。
 
-### P2 — 产品化
-3. web UI 静态层未鉴权(仅 WS 层),公网部署须反代整站防护或静态层加 token 页。
-4. GUI 打包(electron-builder)与分发。
-5. 更多 Agent 驱动(见 docs/03 清单)。
+### P2 — 产品化(2026-11-07 三轮)
+
+- ✅ **web 静态层鉴权**:配置 token 后 HTTP 层同样受保护(gate.html + cookie;curl 实测 302→gate→进入)
+- ✅ **通用 ACP 驱动**(packages/core/src/agents/acp.ts):任意 ACP v1 stdio Agent 一键接入 —— Gemini CLI(--experimental-acp)、Qwen Code、Pi/OMP、Claude(官方 claude-agent-acp 适配器实测);**ACP Agent 审批转发**(session/request_permission → broker)实机 PASS(deny 阻断写入)
+- ✅ GUI 三形态:dev 自拉起 / 远程客户端(ASG_URL 或保存配置)/ 首次连接页;electron-builder 配置就绪
+- ⏳ GUI 安装包产出(nsis)进行中
+- ⏳ 其余 Agent 驱动按 docs/03 清单扩展(ACP 驱动已覆盖其中 ACP 生态成员)
