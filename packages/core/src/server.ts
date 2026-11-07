@@ -21,12 +21,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { randomUUID } from 'node:crypto';
+import { tokenOk } from './auth.ts';
 import type { Gateway } from './gateway.ts';
 import type { SessionRef } from './types.ts';
 
 export interface WsGatewayOptions {
   port: number;
   host?: string;
+  /** Bearer token required on WS upgrades (Authorization header or ?token=). */
+  token?: string;
 }
 
 const MIME: Record<string, string> = {
@@ -51,7 +54,16 @@ function serveStatic(webRoot: string, req: IncomingMessage, res: ServerResponse)
 export function serveGateway(gateway: Gateway, opts: WsGatewayOptions): { close(): Promise<void>; port: number } {
   const webRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'public');
   const httpServer = createServer((req, res) => serveStatic(webRoot, req, res));
-  const wss = new WebSocketServer({ server: httpServer });
+  const wss = new WebSocketServer({ noServer: true });
+  // Auth gate on every WS upgrade (see packages/core/src/auth.ts).
+  httpServer.on('upgrade', (req, socket, head) => {
+    if (!tokenOk(req, opts.token)) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+  });
   const clients = new Set<WebSocket>();
 
   const broadcast = (msg: unknown) => {
