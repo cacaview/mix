@@ -5,6 +5,9 @@
 // concurrent resumes forking one session) is structurally prevented here.
 
 import { EventEmitter } from 'node:events';
+import { watch, type FSWatcher } from 'node:fs';
+import { homedir } from 'node:os';
+import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ClaudeDriver } from './agents/claude.ts';
 import { CodexDriver } from './agents/codex.ts';
@@ -19,11 +22,18 @@ export interface GatewayEvents {
   sessionsChanged: () => void;
 }
 
+export type ApprovalPolicy = 'interactive' | 'allow' | 'deny';
+
 export interface GatewayOptions {
   /** Extra env passed to spawned claude processes (model provider overrides). */
   claudeEnv?: Record<string, string>;
   /** OpenCode server URL for the opencode driver + discovery. */
   opencodeUrl?: string;
+  /** How gateway-brokered approvals resolve without a human:
+   *  interactive (default: wait for a client) | allow | deny. */
+  approvalPolicy?: ApprovalPolicy;
+  /** Auto-deny interactive approvals after this long (ms). 0 = wait forever. */
+  approvalTimeoutMs?: number;
 }
 
 export class Gateway {
@@ -33,10 +43,15 @@ export class Gateway {
   private approvals = new Map<string, { request: ApprovalRequest; resolve: (d: ApprovalDecision) => void }>();
   private claudeEnv?: Record<string, string>;
   private opencodeUrl: string;
+  private approvalPolicy: ApprovalPolicy;
+  private approvalTimeoutMs: number;
+  private opening = new Map<string, Promise<SessionRef>>();
 
   constructor(opts: GatewayOptions = {}) {
     this.claudeEnv = opts.claudeEnv;
     this.opencodeUrl = opts.opencodeUrl ?? 'http://127.0.0.1:4096';
+    this.approvalPolicy = opts.approvalPolicy ?? 'interactive';
+    this.approvalTimeoutMs = opts.approvalTimeoutMs ?? 0;
   }
 
   on<K extends keyof GatewayEvents>(ev: K, cb: GatewayEvents[K]): void {
@@ -62,6 +77,42 @@ export class Gateway {
     return [...this.sessionIndex.values()].sort((a, b) => b.updatedAtMs - a.updatedAtMs);
   }
 
+  // ---- discovery auto-refresh --------------------------------------------
+  private watchers: FSWatcher[] = [];
+  private refreshTimer: NodeJS.Timeout | null = null;
+
+  /** Watch native session stores and refresh the index as they change.
+   *  Native sessions are append-only files; every write is a session update. */
+  startWatching(): void {
+    const roots = [
+      path.join(homedir(), '.claude', 'projects'),
+      path.join(homedir(), '.codex', 'sessions'),
+    ];
+    for (const root of roots) {
+      try {
+        const w = watch(root, { recursive: true }, () => this.#scheduleRefresh());
+        this.watchers.push(w);
+      } catch {
+        /* store not present on this machine */
+      }
+    }
+  }
+
+  stopWatching(): void {
+    for (const w of this.watchers) w.close();
+    this.watchers = [];
+    if (this.refreshTimer) { clearTimeout(this.refreshTimer); this.refreshTimer = null; }
+  }
+
+  /** Debounced: claude/codex append continuously during turns — coalesce. */
+  #scheduleRefresh(): void {
+    if (this.refreshTimer) return;
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = null;
+      void this.refreshSessions().catch(() => { /* transient */ });
+    }, 800);
+  }
+
   getSession(gatewayId: string): SessionRef | undefined {
     return this.sessionIndex.get(gatewayId);
   }
@@ -74,8 +125,17 @@ export class Gateway {
   /**
    * Open a live driver for a session. One writer per gatewayId: an already
    * active driver is reused (second client just subscribes to its events).
+   * Concurrent first-opens coalesce onto a single in-flight open (mutex).
    */
-  async openSession(gatewayId: string): Promise<SessionRef> {
+  openSession(gatewayId: string): Promise<SessionRef> {
+    const inflight = this.opening.get(gatewayId);
+    if (inflight) return inflight;
+    const p = this.#openSessionLocked(gatewayId).finally(() => this.opening.delete(gatewayId));
+    this.opening.set(gatewayId, p);
+    return p;
+  }
+
+  async #openSessionLocked(gatewayId: string): Promise<SessionRef> {
     const existing = this.drivers.get(gatewayId);
     if (existing) return this.sessionIndex.get(gatewayId)!;
     const [agent, nativeId] = this.#parseId(gatewayId);
@@ -105,16 +165,41 @@ export class Gateway {
         options: raw.options as ApprovalRequest['options'],
         createdAtMs: Date.now(),
       };
-      this.approvals.set(raw.requestId, {
+      const resolveAndAudit = (optionId: string, note: string) => {
+        this.approvals.delete(raw.requestId);
+        void driver.resolveApproval(raw.requestId, optionId).catch(() => { /* driver may be gone */ });
+        this.bus.emit('event', gatewayId, {
+          type: 'status', status: 'busy', detail: note } as SessionEvent,
+        );
+      };
+      const policy = this.approvalPolicy;
+      if (policy === 'allow') {
+        resolveAndAudit('allow_once', 'approval auto-allowed (policy=allow)');
+        return;
+      }
+      if (policy === 'deny') {
+        resolveAndAudit('deny_once', 'approval auto-denied (policy=deny)');
+        return;
+      }
+      const entry: { request: ApprovalRequest; resolve: (d: ApprovalDecision) => void; timer?: NodeJS.Timeout } = {
         request,
         resolve: (decision) => {
+          if (entry.timer) clearTimeout(entry.timer);
           this.approvals.delete(raw.requestId);
           void driver.resolveApproval(decision.requestId, decision.optionId);
           this.bus.emit('event', gatewayId, {
             type: 'status', status: 'busy', detail: `approval ${decision.optionId}` } as SessionEvent,
           );
         },
-      });
+      };
+      if (this.approvalTimeoutMs > 0) {
+        entry.timer = setTimeout(() => {
+          if (this.approvals.has(raw.requestId)) {
+            entry.resolve({ requestId: raw.requestId, optionId: 'deny_once' });
+          }
+        }, this.approvalTimeoutMs);
+      }
+      this.approvals.set(raw.requestId, entry);
       this.bus.emit('approval', request);
     });
   }
